@@ -1,0 +1,7 @@
+0. Dataset of chords
+1. Audio loading
+2. Feature extraction (chroma, onset detection)
+3. Machine learning model
+4. Neural Network
+5. Real-time audio input & processing
+6. GUI + sight reading
