@@ -76,7 +76,7 @@ notes_window = 0.3
 
 fs = 44100
 max_frames = 40
-chunk_size = int(0.3 * fs)
+chunk_size = int(notes_window * fs)
 threshold = 0.002 # 0.02
 
 buffer = np.zeros(int(0.3 * fs))
@@ -136,10 +136,6 @@ def predict(snippet):
     # Play snippet for verification
     #sd.play(snippet, fs)
 
-    
-
-ignore_samples = int(notes_window * fs)  # ignore next 0.5 sec after a hit
-samples_since_last_hit = ignore_samples  # initialize above threshold
 
 import numpy as np
 pre_trigger_sec = 0.03  # 50 ms
@@ -153,14 +149,39 @@ post_trigger_samples = int(post_trigger_sec * fs)
 collecting_post = False
 post_audio = []
 pre_snippet = None
+post_needed = 0
 
 def callback(indata, frames, time, status):
-    global buffer, hit_number, samples_since_last_hit, was_above_threshold, collecting_post, post_audio, pre_snippet
+    global buffer, hit_number, samples_since_last_hit, was_above_threshold, collecting_post, post_audio, pre_snippet, post_needed
     audio_chunk = indata[:, 0]  # mono
     samples_since_last_hit += len(audio_chunk)
     current_above_threshold = np.max(np.abs(audio_chunk)) > threshold
 
+    
 
+    if collecting_post:
+        post_audio.append(audio_chunk)
+        total_post = np.concatenate(post_audio)
+        if len(total_post) >= post_needed:
+            post = total_post[:post_needed]
+            # Combine pre and post
+            if pre_snippet is not None and post is not None and pre_snippet.ndim == 1 and post.ndim == 1:
+                snippet = np.concatenate([pre_snippet, post])
+                predict(snippet)
+                snippet = snippet / (np.max(np.abs(snippet)) + 1e-6)
+                print(len(snippet))
+            else:
+                print("Warning: pre_snippet or post is invalid!", type(pre_snippet), type(post))
+            hit_number += 1
+            samples_since_last_hit = 0
+            collecting_post = False
+            post_audio = []
+            pre_snippet = None
+        # Always update buffer
+        buffer = np.roll(buffer, -len(audio_chunk))
+        buffer[-len(audio_chunk):] = audio_chunk
+        was_above_threshold = current_above_threshold
+        return
     
     if np.max(np.abs(audio_chunk)) > threshold and samples_since_last_hit >= ignore_samples and current_above_threshold and not was_above_threshold:
         
@@ -179,25 +200,19 @@ def callback(indata, frames, time, status):
         start_idx = max(0, start_idx - pre_trigger_samples)
         trimmed = audio_chunk[start_idx:]
 
-        # Take exactly 0.25 s
+        # Take exactly 0.25 s for pre-trigger
         snippet_length = int(0.25 * fs)
         if len(trimmed) >= snippet_length:
-            snippet = trimmed[:snippet_length]
+            pre_snippet = trimmed[:snippet_length]
         else:
             pad_width = snippet_length - len(trimmed)
-            snippet = np.pad(trimmed, (0, pad_width), mode='constant')
+            pre_snippet = np.pad(trimmed, (0, pad_width), mode='constant')
 
-        # Normalize amplitude
-        snippet = snippet / (np.max(np.abs(snippet)) + 1e-6)
-
-
-        filename = f"New Pitches 2/{pitch_names[hit_number%12]}_{hit_number//12 + 3}_real2.wav"
-        #sf.write(filename, snippet, fs)
-
-        predict(snippet)
-        hit_number += 1
-        # Reset cooldown
-        samples_since_last_hit = 0
+        # Start collecting post-trigger audio
+        collecting_post = True
+        post_audio = []
+        # Save how many more samples we need
+        post_needed = snippet_length - len(above_thresh)
 
     # Update circular buffer
     buffer = np.roll(buffer, -len(audio_chunk))
