@@ -2,4 +2,4 @@ sounddevice
 numpy
 librosa
 fastapi
-tensorflow
+tensorflowe
