@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Centered ABCJS Staves</title>
+<style>
+  /* Center container horizontally and vertically */
+ html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  justify-content: center; /* center horizontally */
+  align-items: center;     /* center vertically */
+}
+
+#game-container {
+  position: relative;
+  width: 800px;
+  height: 200px;
+  margin: 50px auto; /* center on page */
+  overflow: hidden; /* notes disappear past container */
+  padding-left: 200px; /* move the visible wall closer to center */
+}
+
+#staff-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#paper1, #paper2 {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+</style>
+</head>
+<body>
+    <div id="stats" style="margin-top:20px;">
+  <div>Accuracy: <span id="accuracy">0%</span></div>
+  <div>Best Accuracy: <span id="bestAccuracy">0%</span></div>
+  <div>Most Notes: <span id="mostNotes">0</span></div>
+</div>
+<div id="game-container">
+  <div id="staff-container">
+    <!-- Arrow stays static -->
+    <svg id="arrowSVG" width="20" height="10" style="position: absolute; top: 200px; left: 200px;">
+    <polygon points="10,0 0,10 20,10" fill="blue"/>
+    </svg>
+    <div id="paper1"></div> <!-- Clef/key -->
+    <div id="paper2"></div> <!-- Sliding notes -->
+  </div>
+  
+</div>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js"></script>
+<script>
+function generateRandomABC(numMeasures = 4, notesPerMeasure = 4) {
+  const notes = ["C", "D", "E", "F", "G", "A", "B"];
+  let abc = "X:1\nT: %%spacing 4 \nK:C clef=none\n ";
+
+  // First measure empty (rests)
+  let firstMeasure = [];
+  for (let n = 0; n < notesPerMeasure; n++) {
+    firstMeasure.push("z"); // 'z' = quarter rest in ABC notation
+  }
+  abc += firstMeasure.join(" ") + "|";
+
+  // Remaining measures with random notes
+  for (let m = 1; m < numMeasures; m++) {
+    let measure = [];
+    for (let n = 0; n < notesPerMeasure; n++) {
+      const randomNote = notes[Math.floor(Math.random() * notes.length)];
+      measure.push(randomNote);
+    }
+    abc += measure.join(" ") + "|";
+  }
+
+  return abc;
+}
+
+// Render static staff (clef & key)
+//const abcClef = "X:1\nT:\nK:C\nz4|";
+//ABCJS.renderAbc("paper1", abcClef, { staffwidth: 700, add_classes: true });
+
+// Render notes layer
+
+const numMeasures = 500;
+const notesPerMeasure = 4;
+
+const st_width = 70000
+
+function notesToABC(notes, notesPerMeasure = 4) {
+  let abc = "X:1\nT: %%spacing 4 \nK:C clef=none\n ";
+
+  // First measure empty (rests)
+  let firstMeasure = [];
+  for (let n = 0; n < notesPerMeasure; n++) {
+    firstMeasure.push("z"); // 'z' = quarter rest in ABC notation
+  }
+
+  abc += firstMeasure.join(" ") + "|";
+  for (let i = 0; i < notes.length; i += notesPerMeasure) {
+    let measure = notes.slice(i, i + notesPerMeasure).map(n => n || "z");
+    abc += measure.join(" ") + "|";
+  }
+  return abc;
+}
+
+fetch("http://localhost:8000/notes")
+  .then(response => response.json())
+  .then(data => {
+    const notes = data.notes;
+    const abcNotes = notesToABC(notes, notesPerMeasure);
+    ABCJS.renderAbc("paper2", abcNotes, { staffwidth: st_width, add_classes: true });
+
+    // The rest of your code that depends on the rendered notes goes here:
+    let noteIndex = 0;
+    const allNotes = document.querySelectorAll("#paper2 .abcjs-note");
+    const notesSVG = document.querySelector("#paper2 svg");
+    const totalNotes = notes.length;
+    const noteWidth = st_width / totalNotes;
+    const arrow = document.getElementById("arrowSVG");
+
+    function updateArrow() {
+      if(noteIndex >= allNotes.length) return;
+      const currentNote = allNotes[noteIndex];
+      const bbox = currentNote.getBBox();
+      arrow.style.left = `${bbox.x + bbox.width/2 - 13}px`;
+      arrow.style.top = `${bbox.y + bbox.height + 15}px`;
+    }
+
+    document.addEventListener("keydown", (e) => {
+      const currentNote = allNotes[noteIndex];
+      const isRest = currentNote.classList.contains("abcjs-rest");
+      if(!isRest) {
+        if(e.key.toLowerCase() === "y") {
+          currentNote.setAttribute("fill", "green");
+        } else if(e.key.toLowerCase() === "n") {
+          currentNote.setAttribute("fill", "red");
+        }
+      }
+      noteIndex++;
+      notesSVG.style.transform = `translateX(${-noteIndex * noteWidth}px)`;
+      // Move arrow
+    });
+
+    updateArrow();
+
+    let correctCount = 0;
+let totalCount = 0;
+
+    // Load best stats from localStorage
+    let bestAccuracy = parseFloat(localStorage.getItem("bestAccuracy") || "0");
+    let mostNotes = parseInt(localStorage.getItem("mostNotes") || "0");
+
+    const accuracySpan = document.getElementById("accuracy");
+    const bestAccuracySpan = document.getElementById("bestAccuracy");
+    const mostNotesSpan = document.getElementById("mostNotes");
+
+    bestAccuracySpan.textContent = bestAccuracy.toFixed(2) + "%";
+    mostNotesSpan.textContent = mostNotes;
+
+    const ws = new WebSocket("ws://localhost:8000/ws");
+
+    ws.onmessage = (event) => {
+    const predictedNote = event.data.trim();
+    const currentNote = notes[noteIndex];
+    const currentNoteSVG = allNotes[noteIndex];
+
+    if (!currentNoteSVG) return;
+totalCount++;
+  let correct = false;
+  if (predictedNote === currentNote) {
+    currentNoteSVG.setAttribute("fill", "green");
+    correctCount++;
+    correct = true;
+  } else {
+    currentNoteSVG.setAttribute("fill", "red");
+  }
+
+  // Update accuracy
+  let accuracy = (correctCount / totalCount) * 100;
+  accuracySpan.textContent = accuracy.toFixed(2) + "%";
+
+  // Update best accuracy if needed
+  if (accuracy > bestAccuracy) {
+    bestAccuracy = accuracy;
+    bestAccuracySpan.textContent = bestAccuracy.toFixed(2) + "%";
+    localStorage.setItem("bestAccuracy", bestAccuracy);
+  }
+
+  // Update most notes if needed
+  if (totalCount > mostNotes) {
+    mostNotes = totalCount;
+    mostNotesSpan.textContent = mostNotes;
+    localStorage.setItem("mostNotes", mostNotes);
+  }
+
+  noteIndex++;
+  notesSVG.style.transform = `translateX(${-noteIndex * noteWidth}px)`;
+
+};})
+
+
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Live Piano Notes</title>
+</head>
+<body>
+  <h1>Predicted Note:</h1>
+  <div id="noteDisplay">-</div>
+
+  <script>
+  const noteDisplay = document.getElementById("noteDisplay");
+  const ws = new WebSocket("ws://localhost:8000/ws");
+
+  // Fetch the big list of notes on page load
+  fetch("http://localhost:8000/notes")
+    .then(response => response.json())
+    .then(data => {
+      // Display or use the notes list as you wish
+      console.log("Notes list:", data.notes);
+      // Example: show all notes in a list
+      const notesListDiv = document.createElement("div");
+      notesListDiv.textContent = "All notes: " + data.notes.join(", ");
+      document.body.appendChild(notesListDiv);
+    });
+
+  ws.onmessage = (event) => {
+    noteDisplay.textContent = event.data;
+  };
+</script>
+</body>
+</html>
