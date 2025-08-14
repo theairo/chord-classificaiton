@@ -1,7 +1,5 @@
-0. Dataset of chords
-1. Audio loading
-2. Feature extraction (chroma, onset detection)
-3. Machine learning model
-4. Neural Network
-5. Real-time audio input & processing
-6. GUI + sight reading
+# Feeding real world data helped tremendously on classification real cases (going from 20% accuracy to 90%+)
+# Feedign a new real instrument only made it worse (as an experiment)
+# Increasing chunk size and time for note clarification to 0.5 seconds instead of 0.25 made 99% accuracy. 
+# Going back to 0.25 seconds gives 90%+ accuracy
+# Idea: get New Pitches + 5 main instrumets. Train on 10x augmentation on CNN. 0.3 pause.
