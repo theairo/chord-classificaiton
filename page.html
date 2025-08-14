@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Centered ABCJS Staves</title>
+<style>
+  /* Center container horizontally and vertically */
+ html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  justify-content: center; /* center horizontally */
+  align-items: center;     /* center vertically */
+}
+
+#game-container {
+  position: relative;
+  width: 800px;
+  height: 200px;
+  margin: 50px auto; /* center on page */
+  overflow: hidden; /* notes disappear past container */
+  padding-left: 200px; /* move the visible wall closer to center */
+}
+
+#staff-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#paper1, #paper2 {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+</style>
+</head>
+<body>
+<div id="game-container">
+  <div id="staff-container">
+    <!-- Arrow stays static -->
+    <svg id="arrowSVG" width="20" height="10" style="position: absolute; top: 200px; left: 200px;">
+    <polygon points="10,0 0,10 20,10" fill="blue"/>
+    </svg>
+    <div id="paper1"></div> <!-- Clef/key -->
+    <div id="paper2"></div> <!-- Sliding notes -->
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js"></script>
+<script>
+function generateRandomABC(numMeasures = 4, notesPerMeasure = 4) {
+  const notes = ["C", "D", "E", "F", "G", "A", "B"];
+  let abc = "X:1\nT: %%spacing 4 \nK:C clef=none\n ";
+
+  // First measure empty (rests)
+  let firstMeasure = [];
+  for (let n = 0; n < notesPerMeasure; n++) {
+    firstMeasure.push("z"); // 'z' = quarter rest in ABC notation
+  }
+  abc += firstMeasure.join(" ") + "|";
+
+  // Remaining measures with random notes
+  for (let m = 1; m < numMeasures; m++) {
+    let measure = [];
+    for (let n = 0; n < notesPerMeasure; n++) {
+      const randomNote = notes[Math.floor(Math.random() * notes.length)];
+      measure.push(randomNote);
+    }
+    abc += measure.join(" ") + "|";
+  }
+
+  return abc;
+}
+
+// Render static staff (clef & key)
+//const abcClef = "X:1\nT:\nK:C\nz4|";
+//ABCJS.renderAbc("paper1", abcClef, { staffwidth: 700, add_classes: true });
+
+// Render notes layer
+
+const numMeasures = 500;
+const notesPerMeasure = 4;
+
+const st_width = 70000
+
+const abcNotes = generateRandomABC(numMeasures, notesPerMeasure); // 5 measures, 4 notes each
+ABCJS.renderAbc("paper2", abcNotes, { staffwidth: st_width, add_classes: true });
+
+
+
+let noteIndex = 0; // start after first rest measure
+const allNotes = document.querySelectorAll("#paper2 .abcjs-note");
+const notesSVG = document.querySelector("#paper2 svg");
+
+const totalNotes = numMeasures * notesPerMeasure; // measures * notesPerMeasure
+const noteWidth = st_width / totalNotes;
+
+
+const arrow = document.getElementById("arrowSVG");
+
+// Function to update arrow under the current note
+function updateArrow() {
+  if(noteIndex >= allNotes.length) return;
+  const currentNote = allNotes[noteIndex];
+  const bbox = currentNote.getBBox();
+  const containerRect = notesSVG.getBoundingClientRect();
+
+  // Position arrow centered under the note
+  arrow.style.left = `${bbox.x + bbox.width/2 - 13}px`;
+  arrow.style.top = `${bbox.y + bbox.height + 15}px`; // 5px below note
+}
+
+
+// Keyboard input
+document.addEventListener("keydown", (e) => {
+
+    const currentNote = allNotes[noteIndex];
+    const isRest = currentNote.classList.contains("abcjs-rest"); // depends on abcjs class for rests
+
+    if(!isRest) {
+        if(e.key.toLowerCase() === "y") {
+            currentNote.setAttribute("fill", "green");
+        } else if(e.key.toLowerCase() === "n") {
+            currentNote.setAttribute("fill", "red");
+        }
+    }
+
+    noteIndex++;
+    notesSVG.style.transform = `translateX(${-noteIndex * noteWidth}px)`;
+    // Move arrow
+});
+// Initialize arrow at first note
+updateArrow();
+
+</script>
+</body>
+</html>
