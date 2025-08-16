@@ -7,8 +7,6 @@ import uuid, os, subprocess, librosa
 import tempfile
 import random
 import numpy as np
-import soundfile as sf
-import sounddevice as sd
 
 
 loaded_model = load_model("pitch_detection_cnn.keras")
