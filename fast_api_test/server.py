@@ -9,7 +9,8 @@ import random
 import numpy as np
 
 
-loaded_model = load_model("pitch_detection_cnn.keras")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "pitch_detection_cnn.keras")
+loaded_model = load_model(MODEL_PATH)
 
 
 
