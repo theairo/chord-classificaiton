@@ -47,13 +47,14 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(__file__)  # folder containing server.py
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+PAGE_PATH = os.path.join(BASE_DIR, "static", "page.html")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 @app.get("/")
 async def get_page():
     # redirect to static page
-    with open("static/page.html", encoding="utf-8") as f:
+    with open(PAGE_PATH, encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 import numpy as np
