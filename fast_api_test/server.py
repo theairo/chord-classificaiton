@@ -25,7 +25,7 @@ notes_window = 0.3
 
 max_frames = 40
 chunk_size = int(notes_window * fs)
-threshold = 0.2 # 0.02
+threshold = 0.05 # 0.02
 
 buffer = np.zeros(int(0.3 * fs))
 hit_number = 0  # global counter
@@ -36,12 +36,12 @@ samples_since_last_hit = ignore_samples  # initialize above threshold
 score = 0
 
 
-# Allow CORS for all origins (for simplicity)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Replace with your ngrok URL for better security
+    allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 
@@ -72,76 +72,90 @@ pre_snippet = None
 post_needed = 0
 prediction = ""
 
+
 def callback(audio_chunk):
-    global buffer, hit_number, samples_since_last_hit, was_above_threshold, collecting_post, post_audio, pre_snippet, post_needed, prediction
+    # 1. We only do this process if "was_above_threshold" is True 
+    # 2. We need to finish the previous note, so we get the needed post_snippet amount from the chunk and predict the note as usual. 
+    # 3. Then we cut this from the chunk and focus on what's left. 
+    # 4. We split the the rest of the chunk into 0.03s frames and find mean amplitude for each. We iterate from left to right finding the first moment where the monotonity of amplitude changes (that is mean_i < mean_(i+1). 
+    # 5. We cut the previous frames up to this moment and feed the rest of the chunk to the process() function.
+    global buffer, hit_number, samples_since_last_hit, was_above_threshold
+    global collecting_post, post_audio, pre_snippet, post_needed, prediction
+
     samples_since_last_hit += len(audio_chunk)
     current_above_threshold = np.max(np.abs(audio_chunk)) > threshold
 
     predicted = False
+    remaining_chunk = audio_chunk.copy()
 
+    # Step 1: Finish previous note if collecting_post
     if collecting_post:
         post_audio.append(audio_chunk)
         total_post = np.concatenate(post_audio)
         if len(total_post) >= post_needed:
             post = total_post[:post_needed]
-            # Combine pre and post
-            if pre_snippet is not None and post is not None and pre_snippet.ndim == 1 and post.ndim == 1:
+            if pre_snippet is not None and post.ndim == 1:
                 snippet = np.concatenate([pre_snippet, post])
                 snippet = snippet / (np.max(np.abs(snippet)) + 1e-6)
                 prediction = predict(snippet)
                 predicted = True
-                print(len(snippet))
+                print(f"Predicted snippet length: {len(snippet)}")
             else:
                 print("Warning: pre_snippet or post is invalid!", type(pre_snippet), type(post))
+
             hit_number += 1
             samples_since_last_hit = 0
             collecting_post = False
             post_audio = []
             pre_snippet = None
-        # Always update buffer
-        buffer = np.roll(buffer, -len(audio_chunk))
-        buffer[-len(audio_chunk):] = audio_chunk
-        was_above_threshold = current_above_threshold
-        return predicted
-    
-    # if np.max(np.abs(audio_chunk)) > threshold and samples_since_last_hit >= ignore_samples and current_above_threshold and not was_above_threshold:
-        
 
-    if np.max(np.abs(audio_chunk)) > threshold and samples_since_last_hit >= ignore_samples and current_above_threshold:
-        
+            # Remove used samples from remaining chunk
+            remaining_chunk = total_post[post_needed:]
+
+    # Step 2: Split remaining chunk into frames for monotonicity check
+    frame_len = int(0.03 * fs)  # 30 ms frames
+    num_frames = len(remaining_chunk) // frame_len
+    if num_frames > 1:
+        frame_means = [np.mean(np.abs(remaining_chunk[i*frame_len:(i+1)*frame_len])) 
+                       for i in range(num_frames)]
+
+        # Find first moment where mean amplitude stops decreasing
+        cut_frame = 0
+        for i in range(1, len(frame_means)):
+            if frame_means[i] > frame_means[i-1]:
+                cut_frame = i
+                break
+
+        # Remaining chunk after this point
+        remaining_chunk = remaining_chunk[cut_frame*frame_len:]
+
+    # Step 3: Detect new hit in the remaining chunk
+    if (np.max(np.abs(remaining_chunk)) > threshold and 
+        samples_since_last_hit >= ignore_samples and 
+        current_above_threshold):
+
         print(f"Hit detected! Total hits: {hit_number}")
 
-        above_thresh = np.where(np.abs(audio_chunk) > threshold)[0]
-        if len(above_thresh) == 0:
-            return
-        start_idx = above_thresh[0]
+        above_thresh = np.where(np.abs(remaining_chunk) > threshold)[0]
+        if len(above_thresh) > 0:
+            start_idx = max(0, above_thresh[0] - int(pre_trigger_sec * fs))
+            pre_snippet = remaining_chunk[start_idx:]
+            snippet_length = int(0.25 * fs)
+            if len(pre_snippet) > snippet_length:
+                pre_snippet = pre_snippet[:snippet_length]
 
-        # Optional: keep a short pre-trigger window (e.g., 50 ms)
-        pre_trigger_samples = int(pre_trigger_sec * fs)
-        start_idx = max(0, start_idx - pre_trigger_samples)
+            collecting_post = True
+            post_audio = []
+            post_needed = max(0, snippet_length - len(pre_snippet))
+            print(f"Post needed: {post_needed}, pre_snippet length: {len(pre_snippet)}")
 
-        # Trim from here onward
-        pre_snippet = audio_chunk[start_idx:]
-
-        # Cap length to 0.25 s
-        snippet_length = int(0.25 * fs)
-        if len(pre_snippet) > snippet_length:
-            pre_snippet = pre_snippet[:snippet_length]
-
-        # Start collecting post-trigger audio
-        collecting_post = True
-        post_audio = []
-
-        # Save how many more samples we need (for post-trigger)
-        post_needed = max(0, snippet_length - len(pre_snippet))
-        print(post_needed, len(pre_snippet))
-
-    # Update circular buffer
+    # Step 4: Update buffer
     buffer = np.roll(buffer, -len(audio_chunk))
     buffer[-len(audio_chunk):] = audio_chunk
     was_above_threshold = current_above_threshold
 
     return predicted
+
 
 
 @app.post("/chunk")

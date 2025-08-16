@@ -220,7 +220,7 @@ async function uploadBlob(blob, type) {
   formData.append('chunk', blob, `chunk.${type}`);
   formData.append('type', type);
 
-  const response = await fetch("https://chord-classificaiton.onrender.com/chunk", {
+  const response = await fetch("https://aa7ae143479e.ngrok-free.app/chunk", {
     method: "POST",
     body: formData
   });
@@ -272,7 +272,7 @@ const mostNotesSpan = document.getElementById("mostNotes");
 bestAccuracySpan.textContent = bestAccuracy.toFixed(2) + "%";
 mostNotesSpan.textContent = mostNotes;
 
-fetch("https://chord-classificaiton.onrender.com/notes")
+fetch("https://aa7ae143479e.ngrok-free.app/notes")
   .then(response => response.json())
   .then(data => {
     console.log(241251274712)
