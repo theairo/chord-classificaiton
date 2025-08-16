@@ -45,9 +45,10 @@ app.add_middleware(
 )
 
 
+BASE_DIR = os.path.dirname(__file__)  # folder containing server.py
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
-# Serve static files under /static
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 @app.get("/")
 async def get_page():
