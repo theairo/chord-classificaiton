@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Centered ABCJS Staves</title>
+<style>
+  /* Center container horizontally and vertically */
+ html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  justify-content: center; /* center horizontally */
+  align-items: center;     /* center vertically */
+}
+
+#game-container {
+  position: relative;
+  width: 800px;
+  height: 200px;
+  margin: 50px auto; /* center on page */
+  overflow: hidden; /* notes disappear past container */
+  padding-left: 200px; /* move the visible wall closer to center */
+}
+
+#staff-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#paper1, #paper2 {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+</style>
+</head>
+<body>
+    <button id="startBtn">Start</button>
+    <button id="stopBtn">Stop</button>
+    <button id="playBtn">Play</button>
+    <div id="stats" style="margin-top:20px;">
+  <div>Accuracy: <span id="accuracy">0%</span></div>
+  <div>Best Accuracy: <span id="bestAccuracy">0%</span></div>
+  <div>Most Notes: <span id="mostNotes">0</span></div>
+</div>
+
+<div id="game-container">
+    
+  <div id="staff-container">
+    <!-- Arrow stays static -->
+    <svg id="arrowSVG" width="20" height="10" style="position: absolute; top: 200px; left: 200px;">
+    <polygon points="10,0 0,10 20,10" fill="blue"/>
+    </svg>
+    <div id="paper1"></div> <!-- Clef/key -->
+    <div id="paper2"></div> <!-- Sliding notes -->
+  </div>
+  
+</div>
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js"></script>
+<script type="module">
+let audioContext;
+let processor;
+let source;
+let stream;
+
+const CHUNK_SIZE = 0.25; // seconds
+
+async function startRecording() {
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  audioContext = new AudioContext({sampleRate: 44100});
+  source = audioContext.createMediaStreamSource(stream);
+
+  processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+  let buffer = [];
+
+function markNote(predictedNote) {
+    if (noteIndex >= allNotes.length) return;
+
+    const currentNote = notes[noteIndex];
+    console.log(noteIndex)
+    const currentNoteSVG = allNotes[noteIndex];
+
+    if (!currentNoteSVG) return;
+
+    totalCount++;
+    if (predictedNote === currentNote) {
+        currentNoteSVG.setAttribute("fill", "green");
+        correctCount++;
+    } else {
+        currentNoteSVG.setAttribute("fill", "red");
+    }
+
+    // Update accuracy
+    let accuracy = (correctCount / totalCount) * 100;
+    accuracySpan.textContent = accuracy.toFixed(2) + "%";
+
+    // Update best accuracy
+    if (accuracy > bestAccuracy) {
+        bestAccuracy = accuracy;
+        bestAccuracySpan.textContent = bestAccuracy.toFixed(2) + "%";
+        localStorage.setItem("bestAccuracy", bestAccuracy);
+    }
+
+    // Update most notes
+    if (totalCount > mostNotes) {
+        mostNotes = totalCount;
+        mostNotesSpan.textContent = mostNotes;
+        localStorage.setItem("mostNotes", mostNotes);
+    }
+    console.log(2)
+    noteIndex++;
+    notesGroup.setAttribute("transform", `translate(${-noteIndex * noteWidth},0)`);
+    console.log(noteWidth)
+}
+
+  processor.onaudioprocess = async (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    buffer.push(new Float32Array(input));
+
+    const samplesPerChunk = CHUNK_SIZE * audioContext.sampleRate;
+    const currentLength = buffer.reduce((sum, b) => sum + b.length, 0);
+
+    if (currentLength >= samplesPerChunk) {
+        // Flatten buffer
+        let chunk = new Float32Array(currentLength);
+        let offset = 0;
+        buffer.forEach(b => { chunk.set(b, offset); offset += b.length; });
+        buffer = [];
+
+        // Convert Float32 → 16-bit PCM
+        const pcm16 = floatTo16BitPCM(chunk);
+
+        // Wrap as WAV
+        const wavBlob = encodeWAV(pcm16, audioContext.sampleRate);
+
+        // Upload chunk and get prediction
+        try {
+            const data = await uploadBlob(wavBlob, 'wav'); // returns {prediction: 'C', ...}
+            if (data.prediction && data.prediction !== "No prediction") {
+                markNote(data.prediction);
+            }
+        } catch (err) {
+            console.error("Chunk upload or prediction failed:", err);
+        }
+    }
+};
+
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+  console.log("Recording started...");
+}
+
+function stopRecording() {
+  if (processor) processor.disconnect();
+  if (source) source.disconnect();
+  if (stream) stream.getTracks().forEach(track => track.stop());
+  console.log("Recording stopped.");
+}
+
+// Convert Float32Array [-1,1] → Int16Array
+function floatTo16BitPCM(float32Array) {
+  const buffer = new ArrayBuffer(float32Array.length * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < float32Array.length; i++) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Uint8Array(buffer);
+}
+
+// Encode PCM16 as WAV
+function encodeWAV(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length);
+  const view = new DataView(buffer);
+
+  // RIFF header
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + samples.length, true);
+  writeString(view, 8, "WAVE");
+
+  // fmt chunk
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // channels
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+
+  // data chunk
+  writeString(view, 36, "data");
+  view.setUint32(40, samples.length, true);
+  for (let i = 0; i < samples.length; i++) {
+    view.setUint8(44 + i, samples[i]);
+  }
+
+  return new Blob([view], { type: "audio/wav" });
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+// Upload WAV chunk
+async function uploadBlob(blob, type) {
+  const formData = new FormData();
+  formData.append('chunk', blob, `chunk.${type}`);
+  formData.append('type', type);
+
+  const response = await fetch("http://localhost:8000/chunk", {
+    method: "POST",
+    body: formData
+  });
+
+  const data = await response.json();
+  console.log("Uploaded chunk:", data);
+  return data;
+}
+
+const numMeasures = 500;
+const notesPerMeasure = 4;
+
+const st_width = 70000
+
+function notesToABC(notes, notesPerMeasure = 4) {
+  let abc = "X:1\nT: %%spacing 4 \nK:C clef=none\n ";
+
+  // First measure empty (rests)
+  let firstMeasure = [];
+  for (let n = 0; n < notesPerMeasure; n++) {
+    firstMeasure.push("z"); // 'z' = quarter rest in ABC notation
+  }
+
+  abc += firstMeasure.join(" ") + "|";
+  for (let i = 0; i < notes.length; i += notesPerMeasure) {
+    let measure = notes.slice(i, i + notesPerMeasure).map(n => n || "z");
+    abc += measure.join(" ") + "|";
+  }
+  return abc;
+}
+
+let allNotes = [];
+let notes = [];
+let noteIndex = 0;
+let notesSVG;
+let noteWidth;
+let correctCount = 0;
+let totalCount = 0;
+let totalNotes = 0
+let notesGroup;
+// Load best stats from localStorage
+let bestAccuracy = parseFloat(localStorage.getItem("bestAccuracy") || "0");
+let mostNotes = parseInt(localStorage.getItem("mostNotes") || "0");
+
+const accuracySpan = document.getElementById("accuracy");
+const bestAccuracySpan = document.getElementById("bestAccuracy");
+const mostNotesSpan = document.getElementById("mostNotes");
+
+bestAccuracySpan.textContent = bestAccuracy.toFixed(2) + "%";
+mostNotesSpan.textContent = mostNotes;
+
+fetch("http://localhost:8000/notes")
+  .then(response => response.json())
+  .then(data => {
+    console.log(241251274712)
+    notes = data.notes;
+    const abcNotes = notesToABC(notes, notesPerMeasure);
+    ABCJS.renderAbc("paper2", abcNotes, { staffwidth: st_width, add_classes: true });
+
+    // The rest of your code that depends on the rendered notes goes here:
+    allNotes = document.querySelectorAll("#paper2 .abcjs-note");
+    notesSVG = document.querySelector("#paper2 svg");
+    notesGroup = notesSVG.querySelector("g"); // ABCJS usually wraps notes in <g>
+    totalNotes = notes.length;
+    noteWidth = st_width / totalNotes;
+    const arrow = document.getElementById("arrowSVG");
+
+    function updateArrow() {
+      if(noteIndex >= allNotes.length) return;
+      const currentNote = allNotes[noteIndex];
+      const bbox = currentNote.getBBox();
+      console.log(2152)
+      arrow.style.left = `${bbox.x + bbox.width/2 - 13}px`;
+      arrow.style.top = `${bbox.y + bbox.height + 15}px`;
+    }
+
+    updateArrow();
+    console.log(12124124)
+
+})
+
+document.getElementById("startBtn").addEventListener("click", startRecording);
+document.getElementById("stopBtn").addEventListener("click", stopRecording);
+</script>
+</body>
+</html>

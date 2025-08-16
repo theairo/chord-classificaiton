@@ -4,3 +4,4 @@ librosa
 fastapi
 tensorflow
 uvicorn
+python-multipart
